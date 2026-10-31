@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Spieler-Nachmeldungen</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --fg: #1d1d1f;
+    --muted: #6b6b70;
+    --border: #d9d9de;
+    --stripe: #f5f5f7;
+    --accent: #0a66c2;
+    --error: #b3261e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161618;
+      --fg: #ececf0;
+      --muted: #a0a0a8;
+      --border: #3a3a40;
+      --stripe: #202024;
+      --accent: #6aa9ff;
+      --error: #ff8a80;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 24px 16px 48px;
+    background: var(--bg);
+    color: var(--fg);
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 960px; margin: 0 auto; }
+  h1 { font-size: 1.6rem; margin: 0 0 4px; }
+  p.intro { color: var(--muted); margin: 0 0 24px; }
+  .inputs {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+  .drop {
+    border: 2px dashed var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    cursor: pointer;
+  }
+  .drop.over { border-color: var(--accent); }
+  .drop strong { display: block; margin-bottom: 8px; }
+  .drop input { max-width: 100%; }
+  .drop .info { color: var(--muted); font-size: 0.9rem; margin-top: 8px; min-height: 1.4em; }
+  .error { color: var(--error); }
+  .summary { margin: 0 0 16px; }
+  .summary span { margin-right: 24px; }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td {
+    text-align: left;
+    vertical-align: top;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  th { border-bottom-width: 2px; }
+  tbody tr:nth-child(even) { background: var(--stripe); }
+  td.num, th.num { text-align: right; white-space: nowrap; }
+  td ul { margin: 0; padding: 0; list-style: none; }
+  td .nr { font-variant-numeric: tabular-nums; color: var(--muted); margin-right: 8px; }
+  tfoot td { font-weight: 600; border-bottom: none; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Spieler-Nachmeldungen</h1>
+  <p class="intro">
+    Zeigt, welche Vereine während der Saison zusätzliche Spieler registriert haben.
+    Als „neu“ zählt ein Spieler, dessen Spielernummer in der Liste vom Saisonende,
+    aber nicht in der Liste vom Saisonanfang steht. Vereinswechsler werden ignoriert.
+    Die Dateien werden nur im Browser verarbeitet und nicht hochgeladen.
+  </p>
+
+  <div class="inputs">
+    <label class="drop" data-slot="start">
+      <strong>Anfang der Saison</strong>
+      <input type="file" accept=".csv,.txt,text/csv,text/plain">
+      <div class="info"></div>
+    </label>
+    <label class="drop" data-slot="end">
+      <strong>Ende der Saison</strong>
+      <input type="file" accept=".csv,.txt,text/csv,text/plain">
+      <div class="info"></div>
+    </label>
+  </div>
+
+  <section id="result"></section>
+</main>
+
+<script>
+// Strip the Excel-style ="..." wrapper and whitespace from a cell.
+function clean(value) {
+  let v = (value || "").trim();
+  if (v.startsWith('="') && v.endsWith('"')) {
+    v = v.slice(2, -1);
+  } else if (v.startsWith("=")) {
+    v = v.slice(1);
+  }
+  return v.trim().replace(/^"+|"+$/g, "").trim();
+}
+
+// Return a Map spielernr -> row object (cleaned).
+function parsePlayers(text) {
+  let lines = text.split(/\r\n|\r|\n/);
+
+  // Drop the Excel "sep=" hint line if present
+  if (lines.length && lines[0].toLowerCase().startsWith("sep=")) {
+    lines = lines.slice(1);
+  }
+  if (!lines.length) throw new Error("Datei ist leer.");
+
+  const header = lines[0].split("\t").map(h => clean(h).toLowerCase());
+  if (!header.includes("spielernr")) {
+    throw new Error("Spalte „spielernr“ nicht gefunden.");
+  }
+
+  const players = new Map();
+  for (const line of lines.slice(1)) {
+    const raw = line.split("\t");
+    if (!raw.some(c => c.trim())) continue;
+    const row = {};
+    header.forEach((h, i) => {
+      if (h && i < raw.length) row[h] = clean(raw[i]);
+    });
+    const nr = row.spielernr || "";
+    if (nr) players.set(nr, row);
+  }
+  return players;
+}
+
+async function readPlayers(file) {
+  const buf = await file.arrayBuffer();
+  return parsePlayers(new TextDecoder("windows-1252").decode(buf));
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  }[c]));
+}
+
+const collator = new Intl.Collator("de");
+const data = { start: null, end: null };
+const result = document.getElementById("result");
+
+function render() {
+  if (!data.start || !data.end) {
+    result.innerHTML = "";
+    return;
+  }
+  const { start, end } = data;
+
+  const newByClub = new Map();
+  for (const [nr, row] of end) {
+    if (start.has(nr)) continue;
+    const club = row.verein || "(unbekannt)";
+    if (!newByClub.has(club)) newByClub.set(club, []);
+    newByClub.get(club).push(row);
+  }
+
+  let html = `<p class="summary">
+    <span>Spieler am Anfang: <strong>${start.size}</strong></span>
+    <span>Spieler am Ende: <strong>${end.size}</strong></span>
+  </p>`;
+
+  if (!newByClub.size) {
+    result.innerHTML = html + "<p>Keine neu registrierten Spieler in der Saison.</p>";
+    return;
+  }
+
+  let total = 0;
+  const rows = [...newByClub.keys()].sort(collator.compare).map(club => {
+    const players = newByClub.get(club)
+      .sort((a, b) => collator.compare(a.spielernr, b.spielernr));
+    total += players.length;
+    const list = players.map(p =>
+      `<li><span class="nr">${esc(p.spielernr)}</span>${esc(p.nachname || "")}, ${esc(p.vorname || "")}</li>`
+    ).join("");
+    return `<tr><td>${esc(club)}</td><td class="num">${players.length}</td><td><ul>${list}</ul></td></tr>`;
+  }).join("");
+
+  html += `<div class="table-wrap"><table>
+    <thead><tr><th>Verein</th><th class="num">Neue Spieler</th><th>Spieler</th></tr></thead>
+    <tbody>${rows}</tbody>
+    <tfoot><tr><td>Gesamt (${newByClub.size} Vereine)</td><td class="num">${total}</td><td></td></tr></tfoot>
+  </table></div>`;
+  result.innerHTML = html;
+}
+
+for (const drop of document.querySelectorAll(".drop")) {
+  const slot = drop.dataset.slot;
+  const input = drop.querySelector("input");
+  const info = drop.querySelector(".info");
+
+  async function load(file) {
+    data[slot] = null;
+    info.classList.remove("error");
+    info.textContent = "Lade …";
+    try {
+      data[slot] = await readPlayers(file);
+      info.textContent = `${file.name}: ${data[slot].size} Spieler`;
+    } catch (e) {
+      info.classList.add("error");
+      info.textContent = `${file.name}: ${e.message}`;
+    }
+    render();
+  }
+
+  input.addEventListener("change", () => {
+    if (input.files[0]) load(input.files[0]);
+  });
+  drop.addEventListener("dragover", e => {
+    e.preventDefault();
+    drop.classList.add("over");
+  });
+  drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+  drop.addEventListener("drop", e => {
+    e.preventDefault();
+    drop.classList.remove("over");
+    const file = e.dataTransfer.files[0];
+    if (file) load(file);
+  });
+}
+</script>
+</body>
+</html>
