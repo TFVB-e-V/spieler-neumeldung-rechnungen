@@ -76,7 +76,7 @@
   <h1>Spieler-Nachmeldungen</h1>
   <p class="intro">
     Zeigt, welche Vereine während der Saison zusätzliche Spieler registriert haben.
-    Als „neu“ zählt ein Spieler, dessen Spielernummer in der Liste vom Saisonende,
+    Als Nachmeldung zählt ein Spieler, dessen Spielernummer in der Liste vom Saisonende,
     aber nicht in der Liste vom Saisonanfang steht. Vereinswechsler werden ignoriert.
     Die Dateien werden nur im Browser verarbeitet und nicht hochgeladen.
   </p>
@@ -174,7 +174,7 @@ function render() {
   </p>`;
 
   if (!newByClub.size) {
-    result.innerHTML = html + "<p>Keine neu registrierten Spieler in der Saison.</p>";
+    result.innerHTML = html + "<p>Keine Nachmeldungen in der Saison.</p>";
     return;
   }
 
@@ -190,7 +190,7 @@ function render() {
   }).join("");
 
   html += `<div class="table-wrap"><table>
-    <thead><tr><th>Verein</th><th class="num">Neue Spieler</th><th>Spieler</th></tr></thead>
+    <thead><tr><th>Verein</th><th class="num">Nachmeldungen</th><th>Spieler</th></tr></thead>
     <tbody>${rows}</tbody>
     <tfoot><tr><td>Gesamt (${newByClub.size} Vereine)</td><td class="num">${total}</td><td></td></tr></tfoot>
   </table></div>`;
